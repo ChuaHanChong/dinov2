@@ -153,11 +153,11 @@ def do_train(cfg, model, resume=False):
     start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
-    max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
+    max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH * cfg.train.grad_accum_steps
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer,
-        period=3 * OFFICIAL_EPOCH_LENGTH,
+        period=3 * OFFICIAL_EPOCH_LENGTH * cfg.train.grad_accum_steps,
         max_iter=max_iter,
         max_to_keep=5,
     )
@@ -203,9 +203,9 @@ def do_train(cfg, model, resume=False):
         batch_size=cfg.train.batch_size_per_gpu,
         num_workers=cfg.train.num_workers,
         shuffle=True,
-        seed=cfg.train.seed,  # TODO: Fix this -- cfg.train.seed
+        seed=start_iter,  # TODO: Fix this -- cfg.train.seed
         sampler_type=sampler_type,
-        sampler_advance=start_iter * cfg.train.batch_size_per_gpu,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
+        sampler_advance=0,  # TODO(qas): fix this -- start_iter * cfg.train.batch_size_per_gpu,
         drop_last=True,
         collate_fn=collate_fn,
     )
@@ -280,7 +280,7 @@ def do_train(cfg, model, resume=False):
         if distributed.get_global_size() > 1:
             for v in loss_dict.values():
                 torch.distributed.all_reduce(v)
-        loss_dict_reduced = {k: v.item() * accum_steps / distributed.get_global_size() for k, v in loss_dict.items()}
+        loss_dict_reduced = {k: v.item() / distributed.get_global_size() for k, v in loss_dict.items()}
 
         if math.isnan(sum(loss_dict_reduced.values())):
             logger.info("NaN detected")
@@ -296,22 +296,24 @@ def do_train(cfg, model, resume=False):
 
         # checkpointing and testing
 
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % (cfg.evaluation.eval_period_iterations * cfg.train.grad_accum_steps) == 0 or last_batch:
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
 
-        if need_update:
-            # apply schedules
+        iteration = iteration + 1
 
-            lr = lr_schedule[iteration]
-            wd = wd_schedule[iteration]
-            mom = momentum_schedule[iteration]
-            teacher_temp = teacher_temp_schedule[iteration]
-            last_layer_lr = last_layer_lr_schedule[iteration]
+        if need_update and not last_batch:
+            # apply schedules
+            schedule_iter = iteration // cfg.train.grad_accum_steps
+
+            lr = lr_schedule[schedule_iter]
+            wd = wd_schedule[schedule_iter]
+            mom = momentum_schedule[schedule_iter]
+            teacher_temp = teacher_temp_schedule[schedule_iter]
+            last_layer_lr = last_layer_lr_schedule[schedule_iter]
             apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
 
-        iteration = iteration + 1
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
