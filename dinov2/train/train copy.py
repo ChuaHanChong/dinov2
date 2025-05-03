@@ -153,11 +153,11 @@ def do_train(cfg, model, resume=False):
     start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
-    max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
+    max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH * cfg.train.grad_accum_steps
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer,
-        period=3 * OFFICIAL_EPOCH_LENGTH,
+        period=3 * OFFICIAL_EPOCH_LENGTH * cfg.train.grad_accum_steps,
         max_iter=max_iter,
         max_to_keep=5,
     )
@@ -220,6 +220,17 @@ def do_train(cfg, model, resume=False):
     header = "Training"
 
     accum_steps = cfg.train.grad_accum_steps
+    last_accum_steps = max_iter % accum_steps
+    last_batch_idx = max_iter - 1
+    last_batch_idx_to_accum = max_iter - last_accum_steps
+
+    optimizer.zero_grad(set_to_none=True)
+    lr = lr_schedule[iteration]
+    wd = wd_schedule[iteration]
+    mom = momentum_schedule[iteration]
+    teacher_temp = teacher_temp_schedule[iteration]
+    last_layer_lr = last_layer_lr_schedule[iteration]
+    apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
 
     for data in metric_logger.log_every(
         data_loader,
@@ -229,43 +240,40 @@ def do_train(cfg, model, resume=False):
         start_iter,
     ):
         current_batch_size = data["collated_global_crops"].shape[0] / 2
-        if iteration > max_iter:
+        if iteration >= max_iter:
             return
 
-        # apply schedules
-
-        lr = lr_schedule[iteration]
-        wd = wd_schedule[iteration]
-        mom = momentum_schedule[iteration]
-        teacher_temp = teacher_temp_schedule[iteration]
-        last_layer_lr = last_layer_lr_schedule[iteration]
-        apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
+        # Determine if we need to update after this batch
+        last_batch = iteration == last_batch_idx
+        need_update = last_batch or (iteration + 1) % accum_steps == 0
+        if iteration >= last_batch_idx_to_accum:
+            accum_steps = last_accum_steps
 
         # compute losses
 
-        optimizer.zero_grad(set_to_none=True)
-        for i in range(accum_steps):
-            # TODO: how to split the data correctly?
-            loss_dict = model.forward_backward(data, teacher_temp=teacher_temp, scale=1.0/accum_steps)
+        loss_dict = model.forward_backward(data, teacher_temp=teacher_temp, scale=1.0/accum_steps)
 
-        # clip gradients
+        # clip gradients and update weights only when needed
 
-        if fp16_scaler is not None:
-            if cfg.optim.clip_grad:
-                fp16_scaler.unscale_(optimizer)
-                for v in model.student.values():
-                    v.clip_grad_norm_(cfg.optim.clip_grad)
-            fp16_scaler.step(optimizer)
-            fp16_scaler.update()
-        else:
-            if cfg.optim.clip_grad:
-                for v in model.student.values():
-                    v.clip_grad_norm_(cfg.optim.clip_grad)
-            optimizer.step()
+        if need_update:
+            if fp16_scaler is not None:
+                if cfg.optim.clip_grad:
+                    fp16_scaler.unscale_(optimizer)
+                    for v in model.student.values():
+                        v.clip_grad_norm_(cfg.optim.clip_grad)
+                fp16_scaler.step(optimizer)
+                fp16_scaler.update()
+            else:
+                if cfg.optim.clip_grad:
+                    for v in model.student.values():
+                        v.clip_grad_norm_(cfg.optim.clip_grad)
+                optimizer.step()
 
-        # perform teacher EMA update
+            optimizer.zero_grad(set_to_none=True)
 
-        model.update_teacher(mom)
+            # perform teacher EMA update
+
+            model.update_teacher(mom)
 
         # logging
 
@@ -288,12 +296,24 @@ def do_train(cfg, model, resume=False):
 
         # checkpointing and testing
 
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % (cfg.evaluation.eval_period_iterations * cfg.train.grad_accum_steps) == 0 or last_batch:
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
+
+        if need_update and not last_batch:
+            # apply schedules
+            schedule_iter = iteration // cfg.train.grad_accum_steps
+
+            lr = lr_schedule[schedule_iter]
+            wd = wd_schedule[schedule_iter]
+            mom = momentum_schedule[schedule_iter]
+            teacher_temp = teacher_temp_schedule[schedule_iter]
+            last_layer_lr = last_layer_lr_schedule[schedule_iter]
+            apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
+
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
