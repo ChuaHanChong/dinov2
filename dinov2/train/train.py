@@ -181,6 +181,7 @@ def do_train(cfg, model, resume=False):
         local_crops_size=cfg.crops.local_crops_size,
     )
 
+    accum_steps = cfg.train.grad_accum_steps
     collate_fn = partial(
         collate_data_and_cast,
         mask_ratio_tuple=cfg.ibot.mask_ratio_min_max,
@@ -188,7 +189,7 @@ def do_train(cfg, model, resume=False):
         n_tokens=n_tokens,
         mask_generator=mask_generator,
         dtype=inputs_dtype,
-        grad_accum_steps=cfg.train.grad_accum_steps,
+        grad_accum_steps=accum_steps,
     )
 
     # setup data loader
@@ -221,8 +222,6 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    accum_steps = cfg.train.grad_accum_steps
-
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -230,7 +229,7 @@ def do_train(cfg, model, resume=False):
         max_iter,
         start_iter,
     ):
-        current_batch_size = data[0]["collated_global_crops"].shape[0] / 2
+        current_batch_size = accum_steps * data[0]["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
 
