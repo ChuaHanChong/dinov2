@@ -8,6 +8,7 @@ import logging
 import math
 import os
 from functools import partial
+from collections import defaultdict
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
@@ -187,6 +188,7 @@ def do_train(cfg, model, resume=False):
         n_tokens=n_tokens,
         mask_generator=mask_generator,
         dtype=inputs_dtype,
+        grad_accum_steps=cfg.train.grad_accum_steps,
     )
 
     # setup data loader
@@ -228,7 +230,7 @@ def do_train(cfg, model, resume=False):
         max_iter,
         start_iter,
     ):
-        current_batch_size = data["collated_global_crops"].shape[0] / 2
+        current_batch_size = data[0]["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
 
@@ -244,9 +246,12 @@ def do_train(cfg, model, resume=False):
         # compute losses
 
         optimizer.zero_grad(set_to_none=True)
-        for i in range(accum_steps):
-            # TODO: how to split the data correctly?
-            loss_dict = model.forward_backward(data, teacher_temp=teacher_temp, scale=1.0/accum_steps)
+        loss_dict = defaultdict(float)
+        for data_shard in data:
+            shard_loss_dict = model.forward_backward(data_shard, teacher_temp=teacher_temp, scale=1.0 / accum_steps)
+            for k, v in shard_loss_dict.items():
+                loss_dict[k] += v.detach()  # .detach(): keep the graph small / avoid dangling references
+        loss_dict = {k: v / accum_steps for k, v in loss_dict.items()}
 
         # clip gradients
 

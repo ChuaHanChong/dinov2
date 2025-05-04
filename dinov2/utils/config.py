@@ -44,6 +44,9 @@ def get_cfg_from_args(args):
     cfg = OmegaConf.load(args.config_file)
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
     cfg.train.grad_accum_steps = max(1, getattr(cfg.train, "grad_accum_steps", 1))
+    assert cfg.train.batch_size_per_gpu % cfg.train.grad_accum_steps == 0, (
+        f"Batch size {cfg.train.batch_size_per_gpu} must be divisible by grad_accum_steps {cfg.train.grad_accum_steps}"
+    )
     return cfg
 
 
