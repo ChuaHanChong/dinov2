@@ -665,5 +665,32 @@ def main(args):
 if __name__ == "__main__":
     description = "DINOv2 linear evaluation"
     args_parser = get_args_parser(description=description)
+    args_parser.add_argument(
+        "--balanced-sampler",
+        action="store_true",
+        help="Use a balanced sampler for training data",
+    )
+    args_parser.add_argument(
+        "--balanced-sampler-mode",
+        type=lambda x: int(x) if x.isdigit() else x,
+        default="downsampling",
+        help="Balanced sampler mode. Can be 'downsampling', 'upsampling' or an integer value",
+    )
+    args_parser.add_argument(
+        "--logit-adjusted-loss",
+        action="store_true",
+        help="Use logit adjusted loss",
+    )
+    args_parser.add_argument(
+        "opts",
+        help="""
+Modify config options at the end of the command. For Yacs configs, use
+space-separated "PATH.KEY VALUE" pairs.
+For python-based LazyConfig, use "path.key=value".
+        """.strip(),
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+
     args = args_parser.parse_args()
     sys.exit(main(args))
