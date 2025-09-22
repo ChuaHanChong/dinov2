@@ -510,6 +510,13 @@ if __name__ == "__main__":
         help="Use logit adjusted loss",
     )
     parser.add_argument(
+        "--grad-accum-steps",
+        type=int,
+        default=1,
+        metavar="N",
+        help="The number of steps to accumulate gradients (default: 1)",
+    )
+    parser.add_argument(
         "opts",
         help="""
 Modify config options at the end of the command. For Yacs configs, use
