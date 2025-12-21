@@ -52,6 +52,12 @@ def get_args_parser(
         help="Validation dataset",
     )
     parser.add_argument(
+        "--test-dataset",
+        dest="test_dataset_str",
+        type=str,
+        help="Testing dataset",
+    )
+    parser.add_argument(
         "--nb_knn",
         nargs="+",
         type=int,
@@ -87,6 +93,7 @@ def get_args_parser(
     parser.set_defaults(
         train_dataset_str="ImageNet:split=TRAIN",
         val_dataset_str="ImageNet:split=VAL",
+        test_dataset_str="ImageNet:split=VAL",
         nb_knn=[10, 20, 100, 200],
         temperature=0.07,
         batch_size=256,
@@ -246,6 +253,7 @@ def eval_knn(
     model,
     train_dataset,
     val_dataset,
+    test_dataset,
     accuracy_averaging,
     nb_knn,
     temperature,
@@ -265,6 +273,15 @@ def eval_knn(
 
     val_dataloader = make_data_loader(
         dataset=val_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sampler_type=SamplerType.DISTRIBUTED,
+        drop_last=False,
+        shuffle=False,
+        persistent_workers=True,
+    )
+    test_dataloader = make_data_loader(
+        dataset=test_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
         sampler_type=SamplerType.DISTRIBUTED,
@@ -297,22 +314,31 @@ def eval_knn(
 
     # ============ evaluation ... ============
     logger.info("Start the k-NN classification.")
-    _, results_dict = evaluate(model_with_knn, val_dataloader, postprocessors, metrics, device)
+    _, val_results_dict = evaluate(model_with_knn, val_dataloader, postprocessors, metrics, device)
+    _, test_results_dict = evaluate(model_with_knn, test_dataloader, postprocessors, metrics, device)
 
     # Averaging the results over the n tries for each value of n_per_class
     for n_per_class, knn_module in knn_module_dict.items():
         first_try = list(knn_module.keys())[0]
         k_list = knn_module[first_try].nb_knn
         for k in k_list:
-            keys = results_dict[(n_per_class, first_try, k)].keys()  # keys are e.g. `top-1` and `top-5`
-            results_dict[(n_per_class, k)] = {
-                key: torch.mean(torch.stack([results_dict[(n_per_class, t, k)][key] for t in knn_module.keys()]))
+            keys = val_results_dict[(n_per_class, first_try, k)].keys()  # keys are e.g. `top-1` and `top-5`
+            val_results_dict[(n_per_class, k)] = {
+                key: torch.mean(torch.stack([val_results_dict[(n_per_class, t, k)][key] for t in knn_module.keys()]))
                 for key in keys
             }
-            for t in knn_module.keys():
-                del results_dict[(n_per_class, t, k)]
 
-    return results_dict
+            keys = test_results_dict[(n_per_class, first_try, k)].keys()  # keys are e.g. `top-1` and `top-5`
+            test_results_dict[(n_per_class, k)] = {
+                key: torch.mean(torch.stack([test_results_dict[(n_per_class, t, k)][key] for t in knn_module.keys()]))
+                for key in keys
+            }
+
+            for t in knn_module.keys():
+                del val_results_dict[(n_per_class, t, k)]
+                del test_results_dict[(n_per_class, t, k)]
+
+    return val_results_dict, test_results_dict
 
 
 def eval_knn_with_model(
@@ -320,6 +346,7 @@ def eval_knn_with_model(
     output_dir,
     train_dataset_str="ImageNet:split=TRAIN",
     val_dataset_str="ImageNet:split=VAL",
+    test_dataset_str="ImageNet:split=VAL",
     nb_knn=(10, 20, 100, 200),
     temperature=0.07,
     autocast_dtype=torch.float,
@@ -341,12 +368,17 @@ def eval_knn_with_model(
         dataset_str=val_dataset_str,
         transform=transform,
     )
+    test_dataset = make_dataset(
+        dataset_str=test_dataset_str,
+        transform=transform,
+    )
 
     with torch.cuda.amp.autocast(dtype=autocast_dtype):
-        results_dict_knn = eval_knn(
+        val_results_dict_knn, test_results_dict_knn = eval_knn(
             model=model,
             train_dataset=train_dataset,
             val_dataset=val_dataset,
+            test_dataset=test_dataset,
             accuracy_averaging=accuracy_averaging,
             nb_knn=nb_knn,
             temperature=temperature,
@@ -359,12 +391,19 @@ def eval_knn_with_model(
 
     results_dict = {}
     if distributed.is_main_process():
-        for knn_ in results_dict_knn.keys():
-            top1 = results_dict_knn[knn_]["top-1"].item() * 100.0
-            top5 = results_dict_knn[knn_]["top-5"].item() * 100.0
-            results_dict[f"{knn_} Top 1"] = top1
-            results_dict[f"{knn_} Top 5"] = top5
-            logger.info(f"{knn_} classifier result: Top1: {top1:.2f} Top5: {top5:.2f}")
+        for knn_ in val_results_dict_knn.keys():
+            top1 = val_results_dict_knn[knn_]["top-1"].item() * 100.0
+            top5 = val_results_dict_knn[knn_]["top-5"].item() * 100.0
+            results_dict[f"val {knn_} Top 1"] = top1
+            results_dict[f"val {knn_} Top 5"] = top5
+            logger.info(f"val {knn_} classifier result: Top1: {top1:.2f} Top5: {top5:.2f}")
+
+        for knn_ in test_results_dict_knn.keys():
+            top1 = test_results_dict_knn[knn_]["top-1"].item() * 100.0
+            top5 = test_results_dict_knn[knn_]["top-5"].item() * 100.0
+            results_dict[f"test {knn_} Top 1"] = top1
+            results_dict[f"test {knn_} Top 5"] = top5
+            logger.info(f"test {knn_} classifier result: Top1: {top1:.2f} Top5: {top5:.2f}")
 
     metrics_file_path = os.path.join(output_dir, "results_eval_knn.json")
     with open(metrics_file_path, "a") as f:
@@ -383,6 +422,7 @@ def main(args):
         output_dir=args.output_dir,
         train_dataset_str=args.train_dataset_str,
         val_dataset_str=args.val_dataset_str,
+        test_dataset_str=args.test_dataset_str,
         nb_knn=args.nb_knn,
         temperature=args.temperature,
         autocast_dtype=autocast_dtype,
@@ -400,5 +440,16 @@ def main(args):
 if __name__ == "__main__":
     description = "DINOv2 k-NN evaluation"
     args_parser = get_args_parser(description=description)
+    args_parser.add_argument(
+        "opts",
+        help="""
+Modify config options at the end of the command. For Yacs configs, use
+space-separated "PATH.KEY VALUE" pairs.
+For python-based LazyConfig, use "path.key=value".
+        """.strip(),
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+
     args = args_parser.parse_args()
     sys.exit(main(args))
