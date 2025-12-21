@@ -101,6 +101,12 @@ def get_args_parser(
         help="Learning rates to grid search.",
     )
     parser.add_argument(
+        "--weight-decay", 
+        type=float, 
+        default=1e-4, 
+        help="Weight decay for optimizer"
+    )
+    parser.add_argument(
         "--no-resume",
         action="store_true",
         help="Whether to not resume from existing checkpoints",
@@ -505,6 +511,7 @@ def run_eval_linear(
     save_checkpoint_frequency,
     eval_period_iterations,
     learning_rates,
+    weight_decay,
     autocast_dtype,
     test_dataset_strs=None,
     resume=True,
@@ -553,7 +560,7 @@ def run_eval_linear(
         training_num_classes,
     )
 
-    optimizer = torch.optim.SGD(optim_param_groups, momentum=0.9, weight_decay=0)
+    optimizer = torch.optim.SGD(optim_param_groups, momentum=0.9, weight_decay=weight_decay)
     max_iter = epochs * epoch_length
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, max_iter, eta_min=0)
     checkpointer = Checkpointer(linear_classifiers, output_dir, optimizer=optimizer, scheduler=scheduler)
@@ -648,6 +655,7 @@ def main(args):
         save_checkpoint_frequency=args.save_checkpoint_frequency,
         eval_period_iterations=args.eval_period_iterations,
         learning_rates=args.learning_rates,
+        weight_decay=args.weight_decay,
         autocast_dtype=autocast_dtype,
         resume=not args.no_resume,
         classifier_fpath=args.classifier_fpath,
