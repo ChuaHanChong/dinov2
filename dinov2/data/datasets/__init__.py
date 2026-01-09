@@ -20,6 +20,7 @@ from .image_ship_id_1M import ImageShipID_1M
 from .image_ship_id_200k import ImageShipID_200k
 from .image_ship_id_25k import ImageShipID_25k
 from .image_ship_ood import ImageShipOOD
+from .infiray import InfiRay
 from .birdsnap import Birdsnap
 from .country211 import Country211
 from .cub200_2011 import CUB200_2011
