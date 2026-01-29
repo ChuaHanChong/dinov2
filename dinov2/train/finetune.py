@@ -15,7 +15,10 @@ import torch.nn.functional as F
 from omegaconf import OmegaConf
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..')))
+sys.path.append(os.path.join(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..')), "catalyst"))
 sys.path.append(os.path.join(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..')), "deit"))
+sys.path.append(os.path.join(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..')), "timm"))
+
 from deit.main import (
     DistillationLoss,
     RASampler,
@@ -27,15 +30,10 @@ from deit.main import (
     utils,
 )
 
-sys.path.append(os.path.join(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..')), "catalyst"))
 from catalyst.data.sampler import (
     BalanceClassSampler,
     DistributedSamplerWrapper,
 )
-
-import dinov2.utils.utils as dinov2_utils
-from dinov2.configs import dinov2_default_config
-from dinov2.models import vision_transformer as vits
 
 from timm.data import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
@@ -43,6 +41,10 @@ from timm.models import create_model
 from timm.optim import create_optimizer
 from timm.scheduler import create_scheduler
 from timm.utils import ModelEma, NativeScaler, get_state_dict
+
+import dinov2.utils.utils as dinov2_utils
+from dinov2.configs import dinov2_default_config
+from dinov2.models import vision_transformer as vits
 
 
 def get_cls_num_list(labels):
