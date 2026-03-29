@@ -28,6 +28,7 @@ from .datasets import (
     ImageShipID_1M, 
     ImageShipID_200k, 
     ImageShipID_25k,
+    ImageShipID_All_Extra,
     InfiRay,
     Birdsnap,
     Country211,
@@ -166,6 +167,10 @@ def _parse_dataset_str(dataset_str: str):
         class_ = ImageShipOOD
         if "split" in kwargs:
             kwargs["split"] = ImageShipOOD.Split[kwargs["split"]]
+    elif name == "ImageShipID_All_Extra":
+        class_ = ImageShipID_All_Extra
+        if "split" in kwargs:
+            kwargs["split"] = ImageShipID_All_Extra.Split[kwargs["split"]]
     elif name == "InfiRay":
         class_ = InfiRay
         if "split" in kwargs:
