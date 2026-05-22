@@ -179,6 +179,10 @@ def do_train(cfg, model, resume=False):
         cfg.crops.local_crops_number,
         global_crops_size=cfg.crops.global_crops_size,
         local_crops_size=cfg.crops.local_crops_size,
+        esrgan_prob=cfg.crops.get("esrgan_prob", 0.0),
+        esrgan_scale=cfg.crops.get("esrgan_scale", 2),
+        normalize_mean=cfg.crops.get("normalize_mean", (0.485, 0.456, 0.406)),
+        normalize_std=cfg.crops.get("normalize_std", (0.229, 0.224, 0.225)),
     )
 
     accum_steps = cfg.train.grad_accum_steps
