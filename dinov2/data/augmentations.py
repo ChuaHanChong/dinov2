@@ -4,9 +4,11 @@
 # found in the LICENSE file in the root directory of this source tree.
 
 import logging
+from typing import Sequence
 
 from torchvision import transforms
 
+from .esrgan_augment import ESRGANDegradeTransform
 from .transforms import (
     GaussianBlur,
     make_normalize_transform,
@@ -24,12 +26,22 @@ class DataAugmentationDINO(object):
         local_crops_number,
         global_crops_size=224,
         local_crops_size=96,
+        esrgan_prob: float = 0.0,
+        esrgan_scale: int = 2,
+        normalize_mean: Sequence[float] = (0.485, 0.456, 0.406),
+        normalize_std: Sequence[float] = (0.229, 0.224, 0.225),
     ):
         self.global_crops_scale = global_crops_scale
         self.local_crops_scale = local_crops_scale
         self.local_crops_number = local_crops_number
         self.global_crops_size = global_crops_size
         self.local_crops_size = local_crops_size
+
+        # Per-image ESRGAN degradation; all 10 crops inherit one roll.
+        self.esrgan_transform = ESRGANDegradeTransform(
+            p=esrgan_prob, scale=esrgan_scale, restore_pre_degrade_size=True,
+            device="cpu",
+        )
 
         logger.info("###################################")
         logger.info("Using data augmentation parameters:")
@@ -38,6 +50,10 @@ class DataAugmentationDINO(object):
         logger.info(f"local_crops_number: {local_crops_number}")
         logger.info(f"global_crops_size: {global_crops_size}")
         logger.info(f"local_crops_size: {local_crops_size}")
+        logger.info(f"esrgan_prob: {esrgan_prob}")
+        logger.info(f"esrgan_scale: {esrgan_scale}")
+        logger.info(f"normalize_mean: {tuple(normalize_mean)}")
+        logger.info(f"normalize_std: {tuple(normalize_std)}")
         logger.info("###################################")
 
         # random resized crop and flip
@@ -85,7 +101,7 @@ class DataAugmentationDINO(object):
         self.normalize = transforms.Compose(
             [
                 transforms.ToTensor(),
-                make_normalize_transform(),
+                make_normalize_transform(mean=tuple(normalize_mean), std=tuple(normalize_std)),
             ]
         )
 
@@ -94,6 +110,7 @@ class DataAugmentationDINO(object):
         self.local_transfo = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
 
     def __call__(self, image):
+        image = self.esrgan_transform(image)  # no-op when esrgan_prob=0
         output = {}
 
         # global crops:

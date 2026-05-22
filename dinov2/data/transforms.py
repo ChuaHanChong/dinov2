@@ -8,6 +8,8 @@ from typing import Sequence
 import torch
 from torchvision import transforms
 
+from .esrgan_augment import ESRGANDegradeTransform
+
 
 class GaussianBlur(transforms.RandomApply):
     """
@@ -59,8 +61,20 @@ def make_classification_train_transform(
     hflip_prob: float = 0.5,
     mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
     std: Sequence[float] = IMAGENET_DEFAULT_STD,
+    esrgan_prob: float = 0.0,
+    esrgan_scale: int = 2,
 ):
-    transforms_list = [transforms.RandomResizedCrop(crop_size, interpolation=interpolation)]
+    transforms_list = []
+    if esrgan_prob > 0.0:
+        transforms_list.append(
+            ESRGANDegradeTransform(
+                p=esrgan_prob,
+                scale=esrgan_scale,
+                restore_pre_degrade_size=True,
+                device="cpu",
+            )
+        )
+    transforms_list.append(transforms.RandomResizedCrop(crop_size, interpolation=interpolation))
     if hflip_prob > 0.0:
         transforms_list.append(transforms.RandomHorizontalFlip(hflip_prob))
     transforms_list.extend(

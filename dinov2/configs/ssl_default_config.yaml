@@ -114,5 +114,11 @@ crops:
   - 0.32
   global_crops_size: 224
   local_crops_size: 96
+  # Real-ESRGAN degradation augmentation; esrgan_prob=0 disables it.
+  esrgan_prob: 0.0
+  esrgan_scale: 2
+  # Input normalization mean/std (defaults: ImageNet RGB).
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
 evaluation:
   eval_period_iterations: 12500

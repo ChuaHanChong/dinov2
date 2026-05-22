@@ -447,10 +447,10 @@ def eval_linear(
     return val_results_dict, feature_model, linear_classifiers, iteration
 
 
-def make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type):
+def make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type, norm_kwargs=None):
     test_dataset = make_dataset(
         dataset_str=test_dataset_str,
-        transform=make_classification_eval_transform(),
+        transform=make_classification_eval_transform(**(norm_kwargs or {})),
     )
     test_data_loader = make_data_loader(
         dataset=test_dataset,
@@ -478,11 +478,12 @@ def test_on_datasets(
     best_classifier_on_val,
     prefixstring="",
     test_class_mappings=[None],
+    norm_kwargs=None,
 ):
     results_dict = {}
     for test_dataset_str, class_mapping, metric_type in zip(test_dataset_strs, test_class_mappings, test_metric_types):
         logger.info(f"Testing on {test_dataset_str}")
-        test_data_loader = make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type)
+        test_data_loader = make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type, norm_kwargs=norm_kwargs)
         dataset_results_dict = evaluate_linear_classifiers(
             feature_model,
             remove_ddp_wrapper(linear_classifiers),
@@ -520,9 +521,21 @@ def run_eval_linear(
     test_class_mapping_fpaths=[None],
     val_metric_type=MetricType.MEAN_ACCURACY,
     test_metric_types=None,
+    normalize_mean=None,
+    normalize_std=None,
+    esrgan_prob=0.0,
+    esrgan_scale=2,
     **kwargs,
 ):
     seed = 0
+
+    norm_kwargs = {}
+    if normalize_mean is not None:
+        norm_kwargs["mean"] = tuple(normalize_mean)
+    if normalize_std is not None:
+        norm_kwargs["std"] = tuple(normalize_std)
+
+    train_transform_kwargs = {**norm_kwargs, "esrgan_prob": esrgan_prob, "esrgan_scale": esrgan_scale}
 
     if test_dataset_strs is None:
         test_dataset_strs = [val_dataset_str]
@@ -532,7 +545,7 @@ def run_eval_linear(
         assert len(test_metric_types) == len(test_dataset_strs)
     assert len(test_dataset_strs) == len(test_class_mapping_fpaths)
 
-    train_transform = make_classification_train_transform()
+    train_transform = make_classification_train_transform(**train_transform_kwargs)
     train_dataset = make_dataset(
         dataset_str=train_dataset_str,
         transform=train_transform,
@@ -577,7 +590,7 @@ def run_eval_linear(
         persistent_workers=True,
         balanced_sampler_mode=balanced_sampler_mode,
     )
-    val_data_loader = make_eval_data_loader(val_dataset_str, batch_size, num_workers, val_metric_type)
+    val_data_loader = make_eval_data_loader(val_dataset_str, batch_size, num_workers, val_metric_type, norm_kwargs=norm_kwargs)
 
     checkpoint_period = save_checkpoint_frequency * epoch_length
 
@@ -632,6 +645,7 @@ def run_eval_linear(
             val_results_dict["best_classifier"]["name"],
             prefixstring="",
             test_class_mappings=test_class_mappings,
+            norm_kwargs=norm_kwargs,
         )
     results_dict["best_classifier"] = val_results_dict["best_classifier"]["name"]
     results_dict[f"{val_dataset_str}_accuracy"] = 100.0 * val_results_dict["best_classifier"]["accuracy"]
@@ -666,6 +680,10 @@ def main(args):
         logit_adjusted_loss=args.logit_adjusted_loss,
         balanced_sampler=args.balanced_sampler,
         balanced_sampler_mode=args.balanced_sampler_mode,
+        normalize_mean=args.normalize_mean,
+        normalize_std=args.normalize_std,
+        esrgan_prob=args.esrgan_prob,
+        esrgan_scale=args.esrgan_scale,
     )
     return 0
 
@@ -673,6 +691,32 @@ def main(args):
 if __name__ == "__main__":
     description = "DINOv2 linear evaluation"
     args_parser = get_args_parser(description=description)
+    args_parser.add_argument(
+        "--normalize-mean",
+        nargs=3,
+        type=float,
+        default=None,
+        help="Normalization mean (R G B). Defaults to transform's built-in default.",
+    )
+    args_parser.add_argument(
+        "--normalize-std",
+        nargs=3,
+        type=float,
+        default=None,
+        help="Normalization std (R G B). Defaults to transform's built-in default.",
+    )
+    args_parser.add_argument(
+        "--esrgan-prob",
+        type=float,
+        default=0.0,
+        help="Probability of applying Real-ESRGAN degradation in the train transform (0 disables).",
+    )
+    args_parser.add_argument(
+        "--esrgan-scale",
+        type=int,
+        default=2,
+        help="Real-ESRGAN downsampling factor used when degradation fires.",
+    )
     args_parser.add_argument(
         "--balanced-sampler",
         action="store_true",

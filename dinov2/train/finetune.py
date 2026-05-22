@@ -519,6 +519,20 @@ if __name__ == "__main__":
         help="The number of steps to accumulate gradients (default: 1)",
     )
     parser.add_argument(
+        "--normalize-mean",
+        nargs=3,
+        type=float,
+        default=None,
+        help="Normalization mean (R G B). Defaults to ImageNet default.",
+    )
+    parser.add_argument(
+        "--normalize-std",
+        nargs=3,
+        type=float,
+        default=None,
+        help="Normalization std (R G B). Defaults to ImageNet default.",
+    )
+    parser.add_argument(
         "opts",
         help="""
 Modify config options at the end of the command. For Yacs configs, use
