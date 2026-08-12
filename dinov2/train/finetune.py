@@ -533,6 +533,24 @@ if __name__ == "__main__":
         help="Normalization std (R G B). Defaults to ImageNet default.",
     )
     parser.add_argument(
+        "--eval-data-path",
+        default=None,
+        help="Val-set root, overriding <data-path>/val. Use when data-path has no val/ "
+             "subdir (e.g. a shared val set lives elsewhere).",
+    )
+    parser.add_argument(
+        "--esrgan-prob",
+        type=float,
+        default=0.0,
+        help="Probability of applying Real-ESRGAN degradation to a training image (default: 0, disabled)",
+    )
+    parser.add_argument(
+        "--esrgan-scale",
+        type=int,
+        default=2,
+        help="Real-ESRGAN degradation downscale factor (default: 2)",
+    )
+    parser.add_argument(
         "opts",
         help="""
 Modify config options at the end of the command. For Yacs configs, use
